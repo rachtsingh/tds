@@ -3,8 +3,8 @@ local ffi = require 'ffi'
 local C = tds.C
 
 local elem = {}
-
 local elem_ctypes = {}
+local lib_types = {}
 
 function elem.type()
 end
@@ -23,6 +23,7 @@ function elem.set(celem, lelem)
       C.tds_elem_set_boolean(celem, lelem)
    else
       local tname = elem.type(lelem)
+      conditional_load(tname)
       local setfunc = tname and elem_ctypes[tname]
       if setfunc then
          C.tds_elem_set_pointer(celem, setfunc(lelem))
@@ -56,6 +57,18 @@ function elem.get(celem)
       end
    else
       error('unsupported key/value type (get)')
+   end
+end
+
+function conditional_load(tname)
+   local lib = lib_types[tname]
+   if (lib == nil) or (lib[2]) then
+      return
+   elseif lib[1] == 'cutorch' then
+      for _, Real in ipairs(cudatypes) do
+         addTensorType(Real)
+      end
+      lib[1] = true
    end
 end
 
@@ -98,7 +111,7 @@ if pcall(require, 'torch') then
       end
    )
 
-   for _, Real in ipairs{'Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte'} do
+   function addTensorType(Real)
       local cdefs = [[
 void THRealTensor_retain(THRealTensor *self);
 void THRealTensor_free(THRealTensor *self);
@@ -123,7 +136,17 @@ void THRealTensor_free(THRealTensor *self);
             return lelem
          end
       )
+   end
 
+   for _, Real in ipairs{'Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte'} do
+      addTensorType(Real)
+   end
+
+   -- set cutorch for loading
+   cudatypes = {'Cuda', 'CudaDouble', 'CudaLong', 'CudaInt', 'CudaShort', 'CudaChar', 'CudaByte'}
+   cutorch_lib = {'cutorch', false}
+   for _, Real in ipairs(cudatypes) do
+      lib_types[string.format('torch.%sTensor', Real)] = cutorch_lib
    end
 end
 
